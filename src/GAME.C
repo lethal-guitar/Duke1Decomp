@@ -32,10 +32,9 @@ int cameraPosX;
 int cameraPosY;
 int globalAnimStep;
 
-void BlitSolidTile(word src, word dst)
-{
-  /* TODO */
-}
+
+/* Defined in GFX.ASM */
+void BlitSolidTile(word src, word dst);
 
 
 /*
