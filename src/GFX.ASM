@@ -41,6 +41,54 @@ ASSUME cs:_TEXT, ds:DGROUP, es:NOTHING
 EGA_SEGMENT                     EQU 0a000h
 SOLID_TILE_SEGMENT              EQU (EGA_SEGMENT + 400h)
 
+;
+; Interrupt numbers.
+;
+INT_VIDEO_SERVICE               EQU 10h
+
+
+;
+; Video Service subfunctions.
+;
+VSVC_SET_VIDEO_MODE             EQU 0h
+VSVC_SET_ACTIVE_PAGE            EQU 5h
+VSVC_GET_VIDEO_MODE             EQU 0Fh
+VSVC_PALETTE_REGISTERS          EQU 10h
+
+
+;
+; Set/Get Palette Registers subfunctions.
+;
+PALREG_SET_ONE_COLOR            EQU 0h
+PALREG_SET_BORDER_COLOR         EQU 1h
+
+
+;
+; EGA Sequencer I/O port and registers.
+;
+SEQUENCER_ADDR                  EQU 3c4h  ; During word access, high byte goes to 3c5h
+SEQUENCER_DATA                  EQU 3c5h
+SEQ_MAP_MASK                    EQU 2h
+
+
+;
+; EGA Graphics Controller I/O port and registers.
+;
+GRAPHICS_1_2_ADDR               EQU 3ceh  ; During word access, high byte goes to 3cfh
+GRAPHICS_DATA                   EQU 3cfh
+GFX_ENABLE_SET_RESET            EQU 1h
+GFX_DATA_ROTATE                 EQU 3h
+GFX_READ_MAP_SELECT             EQU 4h
+GFX_MODE                        EQU 5h
+GFX_COLOR_DONT_CARE             EQU 7h
+GFX_BIT_MASK                    EQU 8h
+
+
+;
+; Other EGA registers
+;
+INPUT_STATUS_1_ADDR             EQU 3DAh
+
 
 SEGMENT _TEXT
 
@@ -48,8 +96,197 @@ SEGMENT _TEXT
 ;
 ; Global storage in the code segment.
 ;
+
+db 0Eh dup(0)
+db 0Ch dup(0), 0FFh, 7Fh, 3Fh, 1Fh, 0Fh, 7, 3, 1, 80h
+db 40h, 20h, 10h, 8, 4, 2, 1, 9 dup(0)
+db 3 dup(0)
+db 23 dup(0Ah)
+db 0Dh
+db 0Ah
+db 'Version 1.0 EGA/VGAProGraphx EGA/VGA Toolbox',0Dh,0Ah,1Ah
+
 gfxCurrentDrawPage dw 0  ; EGA memory page to be drawn into (back buffer)
 
+db 1, 4 dup(0), 27h, 3 dup(0), 0C7h, 3 dup(0), 3Fh, 1
+
+
+;
+; Routines
+;
+
+PROC _SetVideoModeByType FAR @@type:WORD
+    PUBLIC _SetVideoModeByType
+    push  bp
+    mov   bp, sp
+
+    mov   ax, [@@type]
+    cmp   al, 0
+    jnz   check1
+    mov   al, 0Dh
+    jmp   short do_int
+    nop
+
+check1:
+    cmp   al, 1
+    jz    do_1
+    xor   ah, ah
+    mov   al, 12h
+    jmp   short do_int
+    nop
+
+do_1:
+    mov   al, 10h
+
+do_int:
+    int   INT_VIDEO_SERVICE
+
+    pop   bp
+    ret
+ENDP
+
+
+PROC _SetVideoMode FAR @@mode_num:WORD
+    PUBLIC _SetVideoMode
+    push  bp
+    mov   bp, sp
+
+    ; Change video mode via BIOS video service interrupt [EGA, pg. 104].
+    mov   ax, [@@mode_num]
+    xor   ah, ah ; set AH to VSVC_SET_VIDEO_MODE
+    int   INT_VIDEO_SERVICE
+
+    pop   bp
+    ret
+ENDP
+
+
+;
+; Load the video border (overscan) register with the specified color value.
+;
+; Returns: Nothing
+; Registers destroyed: AX, BX
+;
+PROC _SetBorderColor FAR @@color_value:WORD
+    PUBLIC _SetBorderColor
+    push  bp
+    mov   bp, sp
+
+    ; Change border color via BIOS video service interrupt [EGA, pg. 104].
+    mov   ah, VSVC_PALETTE_REGISTERS
+    mov   al, PALREG_SET_BORDER_COLOR
+    mov   bx, [@@color_value]
+    mov   bh, bl             ; Value in BL is not used again
+    int   INT_VIDEO_SERVICE
+
+    pop   bp
+    ret
+ENDP
+
+
+PROC _ResetVideo FAR
+    mov  ah, VSVC_GET_VIDEO_MODE
+    int  INT_VIDEO_SERVICE
+
+    xor  ah,ah
+    int  INT_VIDEO_SERVICE
+
+    ret
+ENDP
+
+
+;
+; Load one video palette register with the specified color value.
+;
+; The color value is a byte with the highest two bits unused. The exact meaning
+; of the bits changes depending on the video mode and the type of display
+; connected to the adapter. IBM had three different display units that used
+; similar 9-pin connectors:
+; - IBM Monochrome Display
+; - IBM Color Display
+; - IBM Enhanced Color Display
+;
+; The three display types were electrically interchangeable, and the EGA
+; hardware was capable of driving any of the three displays provided it was set
+; to a video mode that was supported by that display. Since the signal at each
+; pin could be either on or off (with no intermediate levels), the two signal
+; pins on the Monochrome Display supported 4 different shades of mono, the four
+; signal pins on the Color Display supported 16 colors, and the six signal pins
+; on the Enhanced Color Display supported 64 colors. There is a direct mapping
+; between the individual bits in a color value and the signals on the display
+; connector pins, as shown on the abbreviated pinouts [ECD, pg. 6]:
+;
+;   Pin | Monochrome  | Color         | Enhanced Color  | Color Value Bit
+;   ----+-------------+---------------+-----------------+----------------
+;     5 | --          | Blue          | Blue            | 00.....X
+;     4 | --          | Green         | Green           | 00....X.
+;     3 | --          | Red           | Red             | 00...X..
+;     7 | Mono Signal | -- (Reserved) | Blue Intensity  | 00..X...
+;     6 | Intensity   | Intensity     | Green Intensity | 00.X....
+;     2 | -- (Ground) | -- (Ground)   | Red Intensity   | 00X.....
+;
+; NOTE: The base Red/Green/Blue signals contribute 67% of the power of a color
+; channel, and the corresponding Intensity signal(s) provide the remaining 33%.
+; Some sources refer to the Intensity signals as "least significant" due to the
+; amount of output they generate, but this is confusing from the perspective of
+; color value bit packing and we will never say it that way here.
+;
+; The Enhanced Color Display supported two modes [ECD, pg. 3]:
+; - Mode 1: 200 lines, 15.75 kHz HSync rate, positive VSync pulse
+; - Mode 2: 350 lines, 21.8 kHz HSync rate, negative VSync pulse
+;
+; The display used the polarity of the Vertical Sync pulse to determine which
+; mode to use. In display mode 2, all six color inputs contributed to the
+; picture and 64 colors were available for use. In mode 1, the Red Intensity and
+; Blue Intensity inputs to the display were ignored, and the Green Intensity
+; signal was applied across all three color channels [ECD, pg. 4]. This limited
+; the display to 16 colors using the same RGBI pinout the Color Display used.
+; Mode 1 also emulated the Color Display's handling of the color brown: When
+; RGBI 1100 was received, the display fudged *just* the Green Intensity bit on
+; to avoid an unpleasant dark yellow [ECD, pg. 4].
+;
+; This game uses video mode Dh exclusively -- a 200-line mode -- so there is
+; only one intensity bit that can visibly change the screen color and it is not
+; contiguous with the R/G/B bits. The 64 color values are really 16 distinct
+; display colors, each repeated four times. The effective bit positions are:
+;   Bits     | Meaning
+;   ---------+--------
+;   .......X | Blue
+;   ......X. | Green
+;   .....X.. | Red
+;   ....0... | Not Used
+;   ...X.... | Intensity
+;   000..... | Not Used
+;
+; A silver lining to this is that, with the default EGA palette loaded, the bits
+; in a palette register index correspond to bits in the color value, which match
+; the RGBI signals being shown on the display. This is what allows EGA memory
+; planes 0123 to be thought of as BGRI instead. If the sequence were changed or
+; custom-mixed colors were used, this reasonable mental model would fall apart.
+;
+; palette_index (word): The palette register index (0..15). Only the low byte is
+;     used.
+; color_value (word): The color value to program into the register (0..63). Only
+;     the low byte is used.
+; Returns: Nothing
+; Registers destroyed: AX, BX
+;
+PROC _SetPaletteRegister FAR @@palette_index:WORD, @@color_value:WORD
+    PUBLIC _SetPaletteRegister
+    push  bp
+    mov   bp, sp
+
+    ; Change one palette register via BIOS video service interrupt [EGA, pg.
+    ; 105]. Two byte-sized subfunction numbers are being loaded in one MOV
+    ; into AX.
+    mov   ax, (VSVC_PALETTE_REGISTERS SHL 8) OR PALREG_SET_ONE_COLOR
+    mov   bl, [BYTE PTR @@palette_index]
+    mov   bh, [BYTE PTR @@color_value]
+    int   INT_VIDEO_SERVICE
+
+    pop   bp
+    ret
+ENDP
 
 ;
 ; Draw a single 16x16 pixel solid tile to the current draw page.
@@ -76,11 +313,11 @@ PROC _BlitSolidTile FAR @@src_offset:WORD, @@dst_offset:WORD
     mov   dx, EGA_SEGMENT
     mov   ax, [gfxCurrentDrawPage]
     cmp   al, 0
-    jz    drawing_to_first_page
+    jz    @@drawing_to_first_page
     ; When drawing to the 2nd page, add 200h to the destination segment.
     ; Otherwise, skip as DX already holds the correct segment.
     add   dx, 200h
-drawing_to_first_page:
+@@drawing_to_first_page:
 
     ; Set up source and destination pointers from the arguments:
     ;   DS:SI <- Source tile data address (in EGA memory)
@@ -111,6 +348,433 @@ drawing_to_first_page:
     pop   di
     pop   ds
     ASSUME ds:DGROUP
+    pop   bp
+    ret
+ENDP
+
+
+PROC _ApplyMirrorEffect FAR @@x:WORD, @@y:WORD, @@row_offset:WORD
+    PUBLIC _ApplyMirrorEffect
+    push    bp
+    mov     bp, sp
+    push    ds
+    push    di
+    push    si
+
+    ; Set up destination segment (in EGA memory)
+    mov   dx, EGA_SEGMENT
+    mov   ax, [gfxCurrentDrawPage]
+    cmp   al, 0
+    jz    @@drawing_to_first_page
+    ; When drawing to the 2nd page, add 200h to the destination segment.
+    ; Otherwise, skip as DX already holds the correct segment.
+    add   dx, 200h
+@@drawing_to_first_page:
+
+    mov     es, dx
+    mov     ds, dx
+    ASSUME ds:NOTHING
+
+    ; Set AX = (y * 4 + y) * 8 - i.e. AX = y * 40
+    mov     bx, [@@y]
+    mov     ax, bx
+    shl     ax, 1
+    shl     ax, 1
+    add     ax, bx
+    shl     ax, 1
+    shl     ax, 1
+    shl     ax, 1
+
+    ; Set DI = y * 40 + x + 80
+    mov     bx, [@@x]
+    add     ax, bx
+    add     ax, 80
+    mov     di, ax
+
+    ; Set SI = y * 40 + x - 40 - row_offset
+    sub     ax, 120
+    sub     ax, [@@row_offset]
+    mov     si, ax
+
+    mov     bx, 38
+    mov     ax, 82
+
+    REPT 29
+        movsb
+        movsb
+        add     di, bx
+        sub     si, ax
+    ENDM
+
+    movsb
+    movsb
+
+    pop     si
+    pop     di
+    pop     ds
+    ASSUME ds:DGROUP
+    pop     bp
+    ret
+ENDP
+
+
+;
+; Wait for the beginning of the CRT's next vertical blanking interval
+;
+; Returns: Nothing
+; Registers destroyed: AX, DX
+;
+PROC _AwaitVblank
+    PUBLIC _AwaitVblank
+    push  bp
+    mov   bp, sp
+    push  ds
+    push  di
+    push  si
+
+    mov   dx, INPUT_STATUS_1_ADDR
+
+    ; First, wait for a currently ongoing vertical retrace to end.  Reading the
+    ; Input Status #1 register returns a value with bit 3 ( = 8) indicating if
+    ; the display is currently in the vertical blanking interval. Here, we keep
+    ; reading the status register until the bit becomes 0.
+await_vblank_end:
+    in    al, dx
+    and   al, 8
+    jnz   await_vblank_end
+
+    ; Now wait for the begin of the next vertical retrace.  Same thing as above,
+    ; but we keep looping as long as the bit is not set (i.e., is 0).
+await_vblank_begin:
+    in    al, dx
+    and   al, 8
+    jz    await_vblank_begin
+
+    pop   si
+    pop   di
+    pop   ds
+    pop   bp
+    ret
+ENDP
+
+
+PROC _BlitMaskedTile FAR @@src:FAR PTR, @@x:WORD, @@y:WORD
+    PUBLIC _BlitMaskedTile
+    push  bp
+    mov   bp, sp
+    push  ds
+    push  di
+    push  si
+
+    lds   si, [@@src]
+
+    mov   dx, EGA_SEGMENT
+    mov   es, dx
+
+    ; Set AX = (y * 4 + y) * 8 - i.e. AX = y * 40
+    mov   bx, [@@y]
+    mov   ax, bx
+    shl   ax, 1
+    shl   ax, 1
+    add   ax, bx
+    shl   ax, 1
+    shl   ax, 1
+    shl   ax, 1
+
+    ; Set BX = x + y * 40
+    mov     bx, [@@x]
+    add     bx, ax
+
+    mov   ax, [gfxCurrentDrawPage]
+    cmp   al, 0
+    jz    @@drawing_to_first_page
+    mov   cx, ax
+    add   bx, 2000h
+@@drawing_to_first_page:
+
+    mov   dx, SEQUENCER_ADDR
+    mov   al, SEQ_MAP_MASK
+    out   dx, al
+
+    mov   cx, 16
+
+@@repeat:
+    REPT 2
+        mov   dx, GRAPHICS_1_2_ADDR
+
+        lodsb
+
+        mov   ah, GFX_BIT_MASK
+        xchg  ah, al
+        out   dx, ax
+
+        mov   dx, SEQUENCER_DATA
+
+        IRP mask, <1, 2, 4, 8>
+            mov   al, mask
+            out   dx, al
+            lodsb
+            xchg  al, [es:bx]
+        ENDM
+
+        inc   bx
+    ENDM
+
+    add   bx, 38
+    loop  @@repeat
+
+    mov   al, 0Fh
+    out   dx, al
+
+    mov   dx, GRAPHICS_1_2_ADDR
+    mov   ax, 0FF08h
+    out   dx, ax
+
+    pop   si
+    pop   di
+    pop   ds
+    pop   bp
+    ret
+ENDP
+
+
+PROC _BlitFontTile FAR @@src:FAR PTR, @@x:WORD, @@y:WORD
+    PUBLIC _BlitFontTile
+    push  bp
+    mov   bp, sp
+    push  ds
+    push  di
+    push  si
+
+    lds   si, [@@src]
+
+    mov   dx, EGA_SEGMENT
+    mov   es, dx
+
+    ; Set AX = (y * 4 + y) * 8 - i.e. AX = y * 40
+    mov   bx, [@@y]
+    mov   ax, bx
+    shl   ax, 1
+    shl   ax, 1
+    add   ax, bx
+    shl   ax, 1
+    shl   ax, 1
+    shl   ax, 1
+
+    ; Set BX = x + y * 40
+    mov     bx, [@@x]
+    add     bx, ax
+
+    mov   ax, [gfxCurrentDrawPage]
+    cmp   al, 0
+    jz    @@drawing_to_first_page
+    mov   cx, ax
+    add   bx, 2000h
+@@drawing_to_first_page:
+
+    mov   dx, SEQUENCER_ADDR
+    mov   al, SEQ_MAP_MASK
+    out   dx, al
+
+    mov   cx, 8
+
+@@repeat:
+    mov   dx, GRAPHICS_1_2_ADDR
+
+    lodsb
+
+    mov   ah, GFX_BIT_MASK
+    xchg  ah, al
+    out   dx, ax
+
+    mov   dx, SEQUENCER_DATA
+
+    IRP mask, <1, 2, 4, 8>
+        mov   al, mask
+        out   dx, al
+        lodsb
+        xchg  al, [es:bx]
+    ENDM
+
+    add   bx, 40
+    loop  @@repeat
+
+    mov   al, 0Fh
+    out   dx, al
+
+    mov   dx, GRAPHICS_1_2_ADDR
+    mov   ax, 0FF08h
+    out   dx, ax
+
+    pop   si
+    pop   di
+    pop   ds
+    pop   bp
+    ret
+ENDP
+
+
+PROC _BlitFontTileUnmasked FAR @@src:FAR PTR, @@x:WORD, @@y:WORD
+    PUBLIC _BlitFontTileUnmasked
+    push  bp
+    mov   bp, sp
+    push  ds
+    push  di
+    push  si
+
+    lds   si, [@@src]
+
+    mov   dx, EGA_SEGMENT
+    mov   es, dx
+
+    ; Set AX = (y * 4 + y) * 8 - i.e. AX = y * 40
+    mov   bx, [@@y]
+    mov   ax, bx
+    shl   ax, 1
+    shl   ax, 1
+    add   ax, bx
+    shl   ax, 1
+    shl   ax, 1
+    shl   ax, 1
+
+    ; Set BX = x + y * 40
+    mov     bx, [@@x]
+    add     bx, ax
+
+    mov   ax, [gfxCurrentDrawPage]
+    cmp   al, 0
+    jz    @@drawing_to_first_page
+    mov   cx, ax
+    add   bx, 2000h
+@@drawing_to_first_page:
+
+    mov   dx, SEQUENCER_ADDR
+    mov   al, SEQ_MAP_MASK
+    out   dx, al
+
+    mov   cx, 8
+
+@@repeat:
+    lodsb
+
+    mov   dx, SEQUENCER_DATA
+
+    IRP mask, <1, 2, 4, 8>
+        mov   al, mask
+        out   dx, al
+        lodsb
+        xchg  al, [es:bx]
+    ENDM
+
+    add   bx, 40
+    loop  @@repeat
+
+    mov   al, 0Fh
+    out   dx, al
+
+    mov   dx, GRAPHICS_1_2_ADDR
+    mov   ax, 0FF08h
+    out   dx, ax
+
+    pop   si
+    pop   di
+    pop   ds
+    pop   bp
+    ret
+ENDP
+
+
+PROC _Unknown FAR @@arg:WORD
+    PUBLIC _Unknown
+    push    bp
+    mov     bp, sp
+    push    ds
+    push    di
+    push    si
+
+    mov     ax, 40h
+    mov     es, ax
+    mov     dx, [es:63h]
+    add     dl, 6
+
+loc_5BE:
+    in      al, dx
+    test    al, 8
+    jnz     loc_5BE
+
+loc_5C3:
+    in      al, dx
+    test    al, 8
+    jz      loc_5C3
+    sub     dl, 6
+    mov     ax, [@@arg]
+    mov     bh, ah
+    and     bh, 1
+    mov     cl, 4
+    shl     bh, cl
+    mov     ah, al
+    mov     al, 18h
+    out     dx, ax
+    mov     ah, 1Fh
+    and     ah, 0EFh
+
+    or      ah, bh
+    mov     al, 7
+    out     dx, ax
+
+    pop     si
+    pop     di
+    pop     ds
+    pop     bp
+    ret
+ENDP
+
+;
+; Select the video page where subsequent writes should occur.
+;
+; Although higher page numbers are accepted and will store a sensible result,
+; pages beyond number 1 are used for tile storage and writing to them will
+; corrupt the graphics.
+;
+; page_num (word): Page number to write to (0..1).
+; Returns: Nothing
+; Registers destroyed: AX, and those destroyed by UpdateDrawPageSegment
+;
+PROC _SetDrawPage FAR @@page_num:WORD
+    PUBLIC _SetDrawPage
+    push  bp
+    mov   bp, sp
+
+    mov   ax, [@@page_num]
+    mov   [gfxCurrentDrawPage], ax
+
+    pop   bp
+    ret
+ENDP
+
+
+;
+; Change the video page that is currently displayed on the screen.
+;
+; Although higher page numbers are accepted and will behave sensibly, pages
+; beyond number 1 are used for tile storage and they will render as garbage if
+; sent to the screen.
+;
+; page_num (word): Page number to show (0..n). Maximum page number varies based
+;     on the video mode and installed adapter memory, but common values for the
+;     EGA are 0, 1, 3, and 7. Only the low byte is used.
+; Returns: Nothing
+; Registers destroyed: AX
+;
+PROC _SetDisplayPage FAR @@page_num:WORD
+    PUBLIC _SetDisplayPage
+    push  bp
+    mov   bp, sp
+
+    mov   ax, [@@page_num]
+    mov   ah, VSVC_SET_ACTIVE_PAGE
+    int   INT_VIDEO_SERVICE
+
     pop   bp
     ret
 ENDP
