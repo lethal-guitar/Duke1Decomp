@@ -38,7 +38,7 @@ ASSUME cs:_TEXT, ds:DGROUP, es:NOTHING
 ;
 ; Memory segment addresses.
 ;
-EGA_SEGMENT                     EQU 0a000h
+EGA_SEGMENT                     EQU 0A000h
 SOLID_TILE_SEGMENT              EQU (EGA_SEGMENT + 400h)
 
 ;
@@ -66,16 +66,16 @@ PALREG_SET_BORDER_COLOR         EQU 1h
 ;
 ; EGA Sequencer I/O port and registers.
 ;
-SEQUENCER_ADDR                  EQU 3c4h  ; During word access, high byte goes to 3c5h
-SEQUENCER_DATA                  EQU 3c5h
+SEQUENCER_ADDR                  EQU 3C4h  ; During word access, high byte goes to 3c5h
+SEQUENCER_DATA                  EQU 3C5h
 SEQ_MAP_MASK                    EQU 2h
 
 
 ;
 ; EGA Graphics Controller I/O port and registers.
 ;
-GRAPHICS_1_2_ADDR               EQU 3ceh  ; During word access, high byte goes to 3cfh
-GRAPHICS_DATA                   EQU 3cfh
+GRAPHICS_1_2_ADDR               EQU 3CEh  ; During word access, high byte goes to 3cfh
+GRAPHICS_DATA                   EQU 3CFh
 GFX_ENABLE_SET_RESET            EQU 1h
 GFX_DATA_ROTATE                 EQU 3h
 GFX_READ_MAP_SELECT             EQU 4h
@@ -97,17 +97,18 @@ SEGMENT _TEXT
 ; Global storage in the code segment.
 ;
 
-db 0Eh dup(0)
-db 0Ch dup(0), 0FFh, 7Fh, 3Fh, 1Fh, 0Fh, 7, 3, 1, 80h
-db 40h, 20h, 10h, 8, 4, 2, 1, 9 dup(0)
-db 3 dup(0)
-db 23 dup(0Ah)
-db 0Dh
-db 0Ah
-db 'Version 1.0 EGA/VGAProGraphx EGA/VGA Toolbox',0Dh,0Ah,1Ah
+; Unknown data - possibly part of ProGraphx Toolbox, but doesn't seem to be
+; used
+db 0Eh dup(0), 0Ch dup(0), 0FFh, 7Fh, 3Fh, 1Fh, 0Fh, 7, 3, 1, 80h
+db 40h, 20h, 10h, 8, 4, 2, 1, 9 dup(0), 3 dup(0), 23 dup(0Ah)
 
-gfxCurrentDrawPage dw 0  ; EGA memory page to be drawn into (back buffer)
+; ProGraphx Toolbox watermark string
+db 0Dh,0Ah,'Version 1.0 EGA/VGAProGraphx EGA/VGA Toolbox',0Dh,0Ah,1Ah
 
+; EGA memory page to be drawn into (back buffer)
+gfxCurrentDrawPage dw 0
+
+; More unknown data
 db 1, 4 dup(0), 27h, 3 dup(0), 0C7h, 3 dup(0), 3Fh, 1
 
 
@@ -115,15 +116,29 @@ db 1, 4 dup(0), 27h, 3 dup(0), 0C7h, 3 dup(0), 3Fh, 1
 ; Routines
 ;
 
-PROC _SetVideoModeByType FAR @@type:WORD
-    PUBLIC _SetVideoModeByType
+
+;
+; Initialze EGA card in a graphical video mode as specified
+;
+; Unused in the game.
+;
+; type (word): Type of graphics mode to enter. This is _not_ a BIOS video mode,
+;     but a custom enumeration with the following values:
+;     0 - 320x200 16 colors
+;     1 - 640x350 4/16 colors (depends on memory installed on card)
+;     2 - 640x480 16 colors (requires VGA card)
+; Returns: Nothing
+; Registers destroyed: AX
+;
+PROC _SetUpGraphicsMode FAR @@type:WORD
+    PUBLIC _SetUpGraphicsMode
     push  bp
     mov   bp, sp
 
     mov   ax, [@@type]
     cmp   al, 0
     jnz   check1
-    mov   al, 0Dh
+    mov   al, 0Dh ; mode Dh - 320x200 16 color EGA
     jmp   short do_int
     nop
 
@@ -131,12 +146,12 @@ check1:
     cmp   al, 1
     jz    do_1
     xor   ah, ah
-    mov   al, 12h
+    mov   al, 12h ; mode 12h - 640x480 16 color VGA
     jmp   short do_int
     nop
 
 do_1:
-    mov   al, 10h
+    mov   al, 10h ; mode 10h - 640x350 4/16 color EGA
 
 do_int:
     int   INT_VIDEO_SERVICE
@@ -146,6 +161,15 @@ do_int:
 ENDP
 
 
+;
+; Set the video mode to the specified mode number and initialize the EGA card.
+;
+; A similar function exists in the Cosmo and Duke Nukem 2 code bases.
+;
+; mode (word): The BIOS video mode to enter. Only the low byte is used.
+; Returns: Nothing
+; Registers destroyed: AX
+;
 PROC _SetVideoMode FAR @@mode_num:WORD
     PUBLIC _SetVideoMode
     push  bp
@@ -163,6 +187,8 @@ ENDP
 
 ;
 ; Load the video border (overscan) register with the specified color value.
+;
+; A similar function exists in the Cosmo and Duke Nukem 2 code bases.
 ;
 ; Returns: Nothing
 ; Registers destroyed: AX, BX
@@ -184,11 +210,20 @@ PROC _SetBorderColor FAR @@color_value:WORD
 ENDP
 
 
+;
+; Reinitialize video card with the current video mode
+;
+; This resets video memory, restores the default palette etc.
+;
+; Returns: Nothing
+; Registers destroyed: AX
+;
 PROC _ResetVideo FAR
+    PUBLIC _ResetVideo
     mov  ah, VSVC_GET_VIDEO_MODE
     int  INT_VIDEO_SERVICE
 
-    xor  ah,ah
+    xor  ah,ah ; set AH to VSVC_SET_VIDEO_MODE
     int  INT_VIDEO_SERVICE
 
     ret
@@ -197,6 +232,8 @@ ENDP
 
 ;
 ; Load one video palette register with the specified color value.
+;
+; An identical function exists in the Cosmo codebase.
 ;
 ; The color value is a byte with the highest two bits unused. The exact meaning
 ; of the bits changes depending on the video mode and the type of display
@@ -288,10 +325,28 @@ PROC _SetPaletteRegister FAR @@palette_index:WORD, @@color_value:WORD
     ret
 ENDP
 
+
 ;
 ; Draw a single 16x16 pixel solid tile to the current draw page.
 ;
-; TODO: Add documentation
+; Cosmo and Duke Nukem 2 have a similar function, but work on 8x8 tiles instead.
+;
+; This procedure draws non-transparent tiles that are part of the game map and
+; backdrops, as well as various UI elements for the HUD and menus.
+;
+; Source data is read from EGA memory at SOLID_TILE_SEGMENT:src_offset.
+; The destination address is drawPageSegment:dest_offset.
+; The EGA *must* be in latched write mode for this to work correctly.
+;
+; Each tile is a 16x16 pixel square. Each 16-pixel tile row occupies two bytes
+; of EGA address space (1 bit per pixel), for a total of 32 bytes per tile.
+; These 32 bytes are stored sequentially in the source memory, or at 40-byte
+; intervals in the destination memory.
+;
+; Within the EGA, each memory read/write operation is quadrupled across the
+; four color planes. Although only 32 bytes of address space are handled during
+; each call to this procedure, 128 bytes of physical memory are copied
+; internally.
 ;
 ;
 ; src_offset (word): Memory offset of the source tile, relative to the start
@@ -353,7 +408,23 @@ PROC _BlitSolidTile FAR @@src_offset:WORD, @@dst_offset:WORD
 ENDP
 
 
-PROC _ApplyMirrorEffect FAR @@x:WORD, @@y:WORD, @@row_offset:WORD
+;
+; Copy 30 rows of 16 pixels from the given position, mirrored vertically
+;
+; This procedure copies a 16x30 pixel block of data from video memory to video
+; memory, applying vertical mirroring and skipping every other row in the source
+; data.
+;
+; Requires latched write mode!
+;
+; x (word): Horizontal screen position, in bytes
+; y (word): Vertical screen position, in pixels
+; src_offset (word): Offset in bytes for reading the source data. Should be a
+;       multiple of 40 for meaningful results.
+; Returns: Nothing
+; Registers destroyed: AL, DX, ES
+;
+PROC _ApplyMirrorEffect FAR @@x:WORD, @@y:WORD, @@src_offset:WORD
     PUBLIC _ApplyMirrorEffect
     push    bp
     mov     bp, sp
@@ -361,7 +432,7 @@ PROC _ApplyMirrorEffect FAR @@x:WORD, @@y:WORD, @@row_offset:WORD
     push    di
     push    si
 
-    ; Set up destination segment (in EGA memory)
+    ; Set up source and destination segments (both in EGA memory)
     mov   dx, EGA_SEGMENT
     mov   ax, [gfxCurrentDrawPage]
     cmp   al, 0
@@ -370,12 +441,13 @@ PROC _ApplyMirrorEffect FAR @@x:WORD, @@y:WORD, @@row_offset:WORD
     ; Otherwise, skip as DX already holds the correct segment.
     add   dx, 200h
 @@drawing_to_first_page:
-
     mov     es, dx
     mov     ds, dx
     ASSUME ds:NOTHING
 
-    ; Set AX = (y * 4 + y) * 8 - i.e. AX = y * 40
+    ; Set AX = y * 40. To avoid a costly MUL instruction, the expression is
+    ; rearranged into (y * 4 + y) * 8, which can be implemented via cheap
+    ; bit-shifts instead.
     mov     bx, [@@y]
     mov     ax, bx
     shl     ax, 1
@@ -385,27 +457,42 @@ PROC _ApplyMirrorEffect FAR @@x:WORD, @@y:WORD, @@row_offset:WORD
     shl     ax, 1
     shl     ax, 1
 
-    ; Set DI = y * 40 + x + 80
+    ; Set DI = y * 40 + x + 80. This is 2 pixel rows below the position given
+    ; by x and y. The mirrored rows are written starting from here.
     mov     bx, [@@x]
     add     ax, bx
     add     ax, 80
     mov     di, ax
 
-    ; Set SI = y * 40 + x - 40 - row_offset
+    ; Set SI = y * 40 + x - 40 - src_offset. This is 1 pixel row plus the
+    ; specified src_offset above the position given by x and y. The data for
+    ; the mirrored rows is read starting from here.
     sub     ax, 120
-    sub     ax, [@@row_offset]
+    sub     ax, [@@src_offset]
     mov     si, ax
 
     mov     bx, 38
     mov     ax, 82
 
     REPT 29
+        ; Copy 16 pixels (1 byte for 8 pixels). Each MOVSB increments SI and DI
+        ; by one.
+        ; The actual copying of data happens within the EGA card, thanks to the
+        ; latches.
         movsb
         movsb
+
+        ; Add 38 more bytes to DI, to make it point to the next pixel row
+        ; further down (since 40 bytes = 1 pixel horizontally)
         add     di, bx
+
+        ; Subtract 82 from SI. This undoes the increments done by the two MOVSB
+        ; above, and then moves the pointer up by two rows of pixels, skipping
+        ; one row of the source data.
         sub     si, ax
     ENDM
 
+    ; Copy the 30th row's pixels.
     movsb
     movsb
 
@@ -458,8 +545,19 @@ await_vblank_begin:
 ENDP
 
 
-PROC _BlitMaskedTile FAR @@src:FAR PTR, @@x:WORD, @@y:WORD
-    PUBLIC _BlitMaskedTile
+;
+; Draw a single 16x16 sprite tile to the draw page, with transparency
+;
+; TODO: More documentation
+;
+; src (far pointer): Memory address of the first byte of source data
+; x (word): Horizontal screen position, in bytes
+; y (word): Vertical screen position, in pixels
+; Returns: Nothing
+; Registers destroyed: AX, BX, CX, DX, ES
+;
+PROC _BlitMaskedTile_16x16 FAR @@src:FAR PTR, @@x:WORD, @@y:WORD
+    PUBLIC _BlitMaskedTile_16x16
     push  bp
     mov   bp, sp
     push  ds
@@ -471,7 +569,9 @@ PROC _BlitMaskedTile FAR @@src:FAR PTR, @@x:WORD, @@y:WORD
     mov   dx, EGA_SEGMENT
     mov   es, dx
 
-    ; Set AX = (y * 4 + y) * 8 - i.e. AX = y * 40
+    ; Set AX = y * 40. To avoid a costly MUL instruction, the expression is
+    ; rearranged into (y * 4 + y) * 8, which can be implemented via cheap
+    ; bit-shifts instead.
     mov   bx, [@@y]
     mov   ax, bx
     shl   ax, 1
@@ -538,8 +638,21 @@ PROC _BlitMaskedTile FAR @@src:FAR PTR, @@x:WORD, @@y:WORD
 ENDP
 
 
-PROC _BlitFontTile FAR @@src:FAR PTR, @@x:WORD, @@y:WORD
-    PUBLIC _BlitFontTile
+;
+; Draw a single 8x8 sprite tile to the draw page, with transparency
+;
+; Used for fonts/text rendering.
+;
+; TODO: More documentation
+;
+; src (far pointer): Memory address of the first byte of source data
+; x (word): Horizontal screen position, in bytes
+; y (word): Vertical screen position, in pixels
+; Returns: Nothing
+; Registers destroyed: AX, BX, CX, DX, ES
+;
+PROC _BlitMaskedTile_8x8 FAR @@src:FAR PTR, @@x:WORD, @@y:WORD
+    PUBLIC _BlitMaskedTile_8x8
     push  bp
     mov   bp, sp
     push  ds
@@ -551,7 +664,9 @@ PROC _BlitFontTile FAR @@src:FAR PTR, @@x:WORD, @@y:WORD
     mov   dx, EGA_SEGMENT
     mov   es, dx
 
-    ; Set AX = (y * 4 + y) * 8 - i.e. AX = y * 40
+    ; Set AX = y * 40. To avoid a costly MUL instruction, the expression is
+    ; rearranged into (y * 4 + y) * 8, which can be implemented via cheap
+    ; bit-shifts instead.
     mov   bx, [@@y]
     mov   ax, bx
     shl   ax, 1
@@ -614,8 +729,21 @@ PROC _BlitFontTile FAR @@src:FAR PTR, @@x:WORD, @@y:WORD
 ENDP
 
 
-PROC _BlitFontTileUnmasked FAR @@src:FAR PTR, @@x:WORD, @@y:WORD
-    PUBLIC _BlitFontTileUnmasked
+;
+; Draw a single 8x8 sprite tile to the draw page, without transparency
+;
+; Used for fonts/text rendering.
+;
+; TODO: More documentation
+;
+; src (far pointer): Memory address of the first byte of source data
+; x (word): Horizontal screen position, in bytes
+; y (word): Vertical screen position, in pixels
+; Returns: Nothing
+; Registers destroyed: AX, BX, CX, DX, ES
+;
+PROC _BlitSolidTile_8x8 FAR @@src:FAR PTR, @@x:WORD, @@y:WORD
+    PUBLIC _BlitSolidTile_8x8
     push  bp
     mov   bp, sp
     push  ds
@@ -627,7 +755,9 @@ PROC _BlitFontTileUnmasked FAR @@src:FAR PTR, @@x:WORD, @@y:WORD
     mov   dx, EGA_SEGMENT
     mov   es, dx
 
-    ; Set AX = (y * 4 + y) * 8 - i.e. AX = y * 40
+    ; Set AX = y * 40. To avoid a costly MUL instruction, the expression is
+    ; rearranged into (y * 4 + y) * 8, which can be implemented via cheap
+    ; bit-shifts instead.
     mov   bx, [@@y]
     mov   ax, bx
     shl   ax, 1
@@ -684,6 +814,11 @@ PROC _BlitFontTileUnmasked FAR @@src:FAR PTR, @@x:WORD, @@y:WORD
 ENDP
 
 
+;
+; Unknown function
+;
+; Unused in the game.
+;
 PROC _Unknown FAR @@arg:WORD
     PUBLIC _Unknown
     push    bp
@@ -729,8 +864,11 @@ loc_5C3:
     ret
 ENDP
 
+
 ;
-; Select the video page where subsequent writes should occur.
+; Select the video page to draw on (aka backbuffer)
+;
+; A similar function exists in the Cosmo and Duke Nukem 2 code bases.
 ;
 ; Although higher page numbers are accepted and will store a sensible result,
 ; pages beyond number 1 are used for tile storage and writing to them will
@@ -755,6 +893,8 @@ ENDP
 
 ;
 ; Change the video page that is currently displayed on the screen.
+;
+; A similar function exists in the Cosmo and Duke Nukem 2 code bases.
 ;
 ; Although higher page numbers are accepted and will behave sensibly, pages
 ; beyond number 1 are used for tile storage and they will render as garbage if
