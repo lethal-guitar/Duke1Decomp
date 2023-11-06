@@ -25,16 +25,30 @@
 
 #include <dos.h>
 
+
+typedef unsigned char byte;
 typedef unsigned int word;
+
+typedef byte bool;
+
+enum
+{
+  false = 0,
+  true = 1
+};
+
 
 word* levelMapData;
 int cameraPosX;
 int cameraPosY;
 int globalAnimStep;
 
+byte* animSpritesData;
+
 
 /* Defined in GFX.ASM */
 void BlitSolidTile(word src, word dst);
+void BlitMaskedTile_16x16(byte* far src, word x, word y);
 
 
 /*
@@ -181,6 +195,48 @@ void DrawMap(void)
 
   /* Restore EGA state for subsequent sprite drawing operations */
   outport(0x3CE, 5);
+}
+
+
+bool pascal IsOffScreen(int x, int y)
+{
+  if (
+    x >= cameraPosX && x < cameraPosX + 29 && cameraPosY - 64 <= y &&
+    cameraPosY + 1280 > y)
+  {
+    return false;
+  }
+
+  return true;
+}
+
+
+void pascal DrawRabbitoidSprite(int frame, int x, int y)
+{
+  word offset;
+
+  if (frame <= 2)
+  {
+    offset = frame * 320 + 0x4740;
+  }
+  else
+  {
+    offset = (frame - 3) * 320 + 0x8E80;
+  }
+
+  if (!IsOffScreen(x, y - 128))
+  {
+    BlitMaskedTile_16x16(
+      animSpritesData + offset, x - cameraPosX, (y - cameraPosY) >> 3);
+  }
+
+  if (!IsOffScreen(x, y))
+  {
+    BlitMaskedTile_16x16(
+      animSpritesData + offset + 160,
+      x - cameraPosX,
+      ((y - cameraPosY) >> 3) + 16);
+  }
 }
 
 
