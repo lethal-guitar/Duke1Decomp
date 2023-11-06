@@ -383,16 +383,27 @@ PROC _BlitSolidTile FAR @@src_offset:WORD, @@dst_offset:WORD
     ASSUME ds:NOTHING
     mov   si, [@@src_offset]
     mov   di, [@@dst_offset]
+
     mov   bx, 38
 
-    ; Draw 15 rows of tile pixels. All four color planes are copied, in
-    ; parallel, through the EGA's internal latches. The memory read/write cycles
-    ; are doing the actual work here.
-    ; Latched write mode must be enabled!
+    ; Draw 15 rows of tile pixels.
     REPT 15
-      movsb
-      movsb
-      add   di, bx
+        ; Each MOVSB reads one byte from the source address (DS:SI), writes it
+        ; to the destination address (ES:DI), and increments SI and DI by one.
+        ; As a result of the read, the EGA internally reads 4 bytes, one from
+        ; each color plane, and stores them in the hardware's internal latch
+        ; registers.
+        ; The subsequent write triggers writing these 4 bytes to the color
+        ; planes at the destination address, all 4 planes in parallel.
+        ; The byte written by the CPU is ignored, everything happens internally
+        ; in the graphics card.
+        movsb
+        movsb
+
+        ; DI was already incremented by 2 thanks to the two MOVSB. Adding 38
+        ; makes 40 bytes in total, which puts us at the very next row of pixels
+        ; at the destination (the draw page).
+        add   di, bx
     ENDM
 
     ; Draw 16th row
