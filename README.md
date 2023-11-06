@@ -9,9 +9,12 @@ All functions included here have been verified to be 100% matches with the origi
 The game was originally built with Borland Turbo C 2.0 and Turbo Assembler 1.0,
 the same toolchain as for Cosmo's Cosmic Adventures.
 
-### Posts published so far
+### Blog posts
 
 * [Duke Nukem 1's tile rendering](https://lethalguitar.wordpress.com/2023/11/04/duke-nukem-1s-tile-rendering/)
+* (Planned) Duke Nukem 1's sprite rendering
+* (Planned) Duke Nukem 1's actor system
+* (Planned) Duke Nukem 1's collision detection
 
 ### Status
 
