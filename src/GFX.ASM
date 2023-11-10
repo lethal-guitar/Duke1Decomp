@@ -575,6 +575,7 @@ PROC _BlitMaskedTile_16x16 FAR @@src:FAR PTR, @@x:WORD, @@y:WORD
     push  di
     push  si
 
+    ; Load source data pointer into DS:SI
     lds   si, [@@src]
 
     mov   dx, EGA_SEGMENT
@@ -592,51 +593,81 @@ PROC _BlitMaskedTile_16x16 FAR @@src:FAR PTR, @@x:WORD, @@y:WORD
     shl   ax, 1
     shl   ax, 1
 
-    ; Set BX = x + y * 40
+    ; Set BX = x + y * 40, this is our destination address in EGA memory
     mov     bx, [@@x]
     add     bx, ax
 
+    ; Adjust destination pointer according to current draw page
     mov   ax, [gfxCurrentDrawPage]
     cmp   al, 0
     jz    @@drawing_to_first_page
-    mov   cx, ax
+    mov   cx, ax ; Has no effect
     add   bx, 2000h
 @@drawing_to_first_page:
 
+    ; Prepare EGA's Sequencer to receive writes to the Map Mask register, this
+    ; controls which planes are written to by subsequent writes
     mov   dx, SEQUENCER_ADDR
     mov   al, SEQ_MAP_MASK
     out   dx, al
 
+    ; Run the following loop 16 times to draw 16 lines
     mov   cx, 16
 
 @@repeat:
     REPT 2
+        ; Prepare register write below
         mov   dx, GRAPHICS_1_2_ADDR
 
+        ; Read bit mask for the next 8 pixels into AL
         lodsb
 
         mov   ah, GFX_BIT_MASK
-        xchg  ah, al
+        xchg  ah, al ; AL still holds the bit mask from the LODSB above
+
+        ; This is a word-sized out, so it writes AL to GRAPHICS_1_2_ADDR and AH
+        ; to GRAPHICS_DATA. This configures the EGA's Bit Mask register with
+        ; the value we've read from the source data, making all subsequent
+        ; writes ignore bit positions that have 0s in the bit mask.
         out   dx, ax
 
+        ; Prepare for selecting planes. The EGA's Sequencer is still programmed
+        ; to receive values for the Map Mask register with each write to the
+        ; Sequencer Data register, thanks to the preparation above.
         mov   dx, SEQUENCER_DATA
 
         IRP mask, <1, 2, 4, 8>
+            ; Select plane for writing
             mov   al, mask
             out   dx, al
+
+            ; Read next byte from source data...
             lodsb
+
+            ; ...and write it to video memory. All 4 writes go to the same
+            ; address, but end up in different planes thanks to the Map Mask
+            ; manipulation right before.
+            ; This could just as well be a MOV instruction, XCHG was most
+            ; likely used as a size optimization as it's encoded form is
+            ; smaller.
             xchg  al, [es:bx]
         ENDM
 
+        ; Go to the next destination byte to target the next 8 pixels in the
+        ; draw page
         inc   bx
     ENDM
 
+    ; Skip down by one pixel so we can write the next line (40 bytes is one
+    ; full row of pixels in EGA address space)
     add   bx, 38
     loop  @@repeat
 
+    ; Reset Map Mask to enable writing to all planes simultaneously
     mov   al, 0Fh
     out   dx, al
 
+    ; Reset Bit Mask to enable writing all bit positions
     mov   dx, GRAPHICS_1_2_ADDR
     mov   ax, 0FF08h
     out   dx, ax
