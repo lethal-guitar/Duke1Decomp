@@ -198,6 +198,11 @@ void DrawMap(void)
 }
 
 
+/* Unit conversions */
+#define WORLD_2_SCREEN_X(a) ((a)-cameraPosX)
+#define WORLD_2_SCREEN_Y(a) (((a)-cameraPosY) >> 3)
+
+
 bool pascal IsOffScreen(int x, int y)
 {
   if (
@@ -217,25 +222,25 @@ void pascal DrawRabbitoidSprite(int frame, int x, int y)
 
   if (frame <= 2)
   {
-    offset = frame * 320 + 0x4740;
+    offset = frame * 320 + 18240;
   }
   else
   {
-    offset = (frame - 3) * 320 + 0x8E80;
+    offset = (frame - 3) * 320 + 36480;
   }
 
   if (!IsOffScreen(x, y - 128))
   {
     BlitMaskedTile_16x16(
-      animSpritesData + offset, x - cameraPosX, (y - cameraPosY) >> 3);
+      animSpritesData + offset, WORLD_2_SCREEN_X(x), WORLD_2_SCREEN_Y(y));
   }
 
   if (!IsOffScreen(x, y))
   {
     BlitMaskedTile_16x16(
       animSpritesData + offset + 160,
-      x - cameraPosX,
-      ((y - cameraPosY) >> 3) + 16);
+      WORLD_2_SCREEN_X(x),
+      WORLD_2_SCREEN_Y(y) + 16);
   }
 }
 
