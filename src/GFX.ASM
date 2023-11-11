@@ -559,7 +559,10 @@ ENDP
 ;
 ; Draw a single 16x16 sprite tile to the draw page, with transparency
 ;
-; TODO: More documentation
+; The source data must be 160 bytes, organized into 16 10-byte lines. Each
+; line is expected to be a pair of two 8-pixel spans, encoded as 5 bytes:
+; First the transparency mask, then 4 color planes in order blue, green, red,
+; and intensity.
 ;
 ; src (far pointer): Memory address of the first byte of source data
 ; x (word): Horizontal screen position, in bytes
@@ -619,11 +622,12 @@ PROC _BlitMaskedTile_16x16 FAR @@src:FAR PTR, @@x:WORD, @@y:WORD
         ; Prepare register write below
         mov   dx, GRAPHICS_1_2_ADDR
 
-        ; Read bit mask for the next 8 pixels into AL
+        ; Read bit mask for the next 8 pixels. This instruction reads a byte
+        ; from DS:SI into AL and increments SI.
         lodsb
 
         mov   ah, GFX_BIT_MASK
-        xchg  ah, al ; AL still holds the bit mask from the LODSB above
+        xchg  ah, al ; AL holds the bit mask thanks to the LODSB above
 
         ; This is a word-sized out, so it writes AL to GRAPHICS_1_2_ADDR and AH
         ; to GRAPHICS_DATA. This configures the EGA's Bit Mask register with
@@ -648,7 +652,7 @@ PROC _BlitMaskedTile_16x16 FAR @@src:FAR PTR, @@x:WORD, @@y:WORD
             ; address, but end up in different planes thanks to the Map Mask
             ; manipulation right before.
             ; This could just as well be a MOV instruction, XCHG was most
-            ; likely used as a size optimization as it's encoded form is
+            ; likely used as a size optimization as its encoded form is
             ; smaller.
             xchg  al, [es:bx]
         ENDM
