@@ -24,6 +24,7 @@
  */
 
 #include <dos.h>
+#include <stdio.h>
 
 
 typedef unsigned char byte;
@@ -42,6 +43,15 @@ word* levelMapData;
 int cameraPosX;
 int cameraPosY;
 int globalAnimStep;
+
+int plPosX;
+int plPosY;
+byte plClimbUpAnimFramesLeft;
+bool plIsFalling;
+bool plHangingFromCeiling;
+byte plAnimFrame;
+bool plHasGrapplingHooks;
+bool gmCameraAdjustmentNeeded;
 
 byte* animSpritesData;
 
@@ -68,6 +78,201 @@ void BlitMaskedTile_16x16(byte* far src, word x, word y);
 #define MAP_DRAW_END_ADDRESS 6428
 
 #define BACKDROP_SRC_START_OFFSET 0x4000
+
+
+#define SND_CLING_HOOKS 27
+#define SND_HIT_HEAD 38
+
+
+void pascal PlaySound(int num) { }
+
+
+void pascal UploadTileset(char* filename, word destOffset, int size)
+{
+  static byte far* unused;
+  static byte far* dest;
+
+  register int i;
+  FILE* fp = fopen(filename, "rb");
+
+  if (*filename == 0)
+  {
+    return;
+  }
+
+  unused = MK_FP(0xA000, 0);
+  dest = MK_FP(0xA000, 0x4000);
+
+  size /= 4;
+
+  fgetc(fp);
+  fgetc(fp);
+  fgetc(fp);
+
+  for (i = 0; i < size; i++)
+  {
+    fgetc(fp);
+
+    outport(0x3C4, 0x102);
+    *(dest + i + destOffset) = fgetc(fp);
+
+    outport(0x3C4, 0x202);
+    *(dest + i + destOffset) = fgetc(fp);
+
+    outport(0x3C4, 0x402);
+    *(dest + i + destOffset) = fgetc(fp);
+
+    outport(0x3C4, 0x802);
+    *(dest + i + destOffset) = fgetc(fp);
+  }
+
+  fclose(fp);
+}
+
+
+bool CanPlayerMoveLeft(void)
+{
+  word* tile;
+  word* tileAbove;
+  word* tile2;
+
+  tile2 = tile = levelMapData + ((plPosX + cameraPosX - 3) >> 1) + cameraPosY +
+    ((plPosY - 16) >> 4) * 128;
+
+  tileAbove = tile - 128;
+
+  if ((plPosY >> 3) & 1)
+  {
+    tile2 += 128;
+  }
+
+  if (*tile > 0x17FF || *tileAbove > 0x17FF || *tile2 > 0x17FF)
+  {
+    return false;
+  }
+  else
+  {
+    return true;
+  }
+}
+
+
+bool CanPlayerMoveRight(void)
+{
+  word* tile;
+  word* tileAbove;
+  word* tile2;
+
+  tile2 = tile = levelMapData + ((cameraPosX + plPosX) >> 1) + cameraPosY +
+    ((plPosY - 16) >> 4) * 128;
+
+  tileAbove = tile - 128;
+
+  if ((plPosY >> 3) & 1)
+  {
+    tile2 += 128;
+  }
+
+  if (*tile > 0x17FF || *tileAbove > 0x17FF || *tile2 > 0x17FF)
+  {
+    return false;
+  }
+  else
+  {
+    return true;
+  }
+}
+
+
+bool CanPlayerMoveUp(void)
+{
+  word* tile1;
+  word* tile2;
+
+  tile2 = tile1 = levelMapData + ((plPosX + cameraPosX - 2) >> 1) + cameraPosY +
+    (((plPosY - 40) >> 4) * 128);
+
+  if ((plPosX + cameraPosX) & 1)
+  {
+    tile2 += 1;
+  }
+
+  if (
+    *tile1 >= 0x2EE0 || *tile2 >= 0x2EE0 ||
+    (*tile1 >= 0x1B80 && *tile1 <= 0x1CA0) ||
+    (*tile2 >= 0x1B80 && *tile2 <= 0x1CA0))
+  {
+    if (!plClimbUpAnimFramesLeft && !plIsFalling)
+    {
+      if (!plHangingFromCeiling)
+      {
+        plAnimFrame = 0;
+
+        if (plHasGrapplingHooks)
+        {
+          plHangingFromCeiling = true;
+          gmCameraAdjustmentNeeded = true;
+
+          PlaySound(SND_CLING_HOOKS);
+        }
+        else
+        {
+          PlaySound(SND_HIT_HEAD);
+        }
+      }
+    }
+
+    return false;
+  }
+  else
+  {
+    plHangingFromCeiling = false;
+
+    if (*tile1 > 0x17FF || *tile2 > 0x17FF)
+    {
+      if (!plHangingFromCeiling)
+      {
+        PlaySound(SND_HIT_HEAD);
+      }
+
+      return false;
+    }
+    else
+    {
+      return true;
+    }
+  }
+}
+
+
+bool IsPlayerInAir(void)
+{
+  word* tile1;
+  word* tile2;
+
+  if (plClimbUpAnimFramesLeft)
+  {
+    return false;
+  }
+
+  tile2 = tile1 = levelMapData + ((plPosX + cameraPosX - 2) >> 1) + cameraPosY +
+    ((plPosY >> 4) * 128);
+
+  if ((plPosX + cameraPosX) & 1)
+  {
+    tile2 += 1;
+  }
+
+  if (*tile1 > 0x17FF || *tile2 > 0x17FF)
+  {
+    return false;
+  }
+  else
+  {
+    return true;
+  }
+}
+
 
 void DrawMap(void)
 {
