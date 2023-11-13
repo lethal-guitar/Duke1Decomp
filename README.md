@@ -18,4 +18,4 @@ the same toolchain as for Cosmo's Cosmic Adventures.
 
 ### Status
 
-8 / 247 functions decompiled (3.3 %)
+11 / 247 functions decompiled (4.5 %)

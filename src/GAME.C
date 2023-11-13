@@ -24,6 +24,7 @@
  */
 
 #include <dos.h>
+#include <math.h>
 #include <stdio.h>
 
 
@@ -105,12 +106,14 @@ void pascal UploadTileset(char* filename, word destOffset, int size)
 
   size /= 4;
 
+  /* Skip ProGraphx file format header */
   fgetc(fp);
   fgetc(fp);
   fgetc(fp);
 
   for (i = 0; i < size; i++)
   {
+    /* Skip mask byte - not transparency for EGA-resident tiles */
     fgetc(fp);
 
     outport(0x3C4, 0x102);
@@ -403,6 +406,21 @@ void DrawMap(void)
 }
 
 
+void LoadSpriteData(char* filename, byte* buffer, int size)
+{
+  FILE* fp = fopen(filename, "rb");
+
+  /* Skip ProGraphx file format header */
+  fgetc(fp);
+  fgetc(fp);
+  fgetc(fp);
+
+  fread(buffer, size, 1, fp);
+
+  fclose(fp);
+}
+
+
 /* Unit conversions */
 #define WORLD_2_SCREEN_X(a) ((a)-cameraPosX)
 #define WORLD_2_SCREEN_Y(a) (((a)-cameraPosY) >> 3)
@@ -419,6 +437,47 @@ bool pascal IsOffScreen(int x, int y)
 
   return true;
 }
+
+
+int IsTouchingPlayer(int x, int y)
+{
+  register int deltaY = (plPosY >> 4) * 128 + cameraPosY - y + 2;
+
+  if (abs(plPosX + cameraPosX - x) < 2 && deltaY > 16 && deltaY < 384)
+  {
+    return true;
+  }
+
+  return false;
+}
+
+
+int IntersectsSolidTile(int x, int y)
+{
+  word* tile1;
+  word* tile2;
+
+  tile2 = tile1 = levelMapData + (x >> 1) + ((y >> 7) << 7) - 1;
+
+  if (x & 1)
+  {
+    tile2 += 1;
+  }
+
+  if (*tile1 > 0x17FF || *tile2 > 0x17FF)
+  {
+    return true;
+  }
+  else
+  {
+    return false;
+  }
+}
+
+
+/*******************************************************************************
+ * Actors
+ *******************************************************************************/
 
 
 void pascal DrawRabbitoidSprite(int frame, int x, int y)
