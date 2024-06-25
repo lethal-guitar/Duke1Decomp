@@ -13,4 +13,4 @@ the same toolchain as for Cosmo's Cosmic Adventures.
 * [Duke Nukem 1's tile rendering](https://lethalguitar.wordpress.com/2023/11/04/duke-nukem-1s-tile-rendering/)
 * [Duke Nukem 1's sprite rendering](https://lethalguitar.wordpress.com/2023/11/12/duke-nukem-1s-sprite-rendering/)
 * (Planned) Duke Nukem 1's actor system
-* (Planned) Duke Nukem 1's collision detection
+* [Duke Nukem 1's collision detection](https://lethalguitar.wordpress.com/2023/12/12/duke-nukem-1s-collision-detection/)
